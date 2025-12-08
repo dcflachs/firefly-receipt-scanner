@@ -5,6 +5,7 @@ from urllib.parse import urljoin
 
 import requests
 from dotenv import load_dotenv
+from .models import ReceiptModel
 
 # Load environment variables
 load_dotenv()
@@ -84,7 +85,7 @@ def get_firefly_asset_accounts():
         return []
 
 
-def create_firefly_transaction(receipt, source_account="Cash wallet"):
+def create_firefly_transaction(receipt: ReceiptModel, source_account="Cash wallet"):
     url = urljoin(API_URL, "transactions")
     headers = {
         "Authorization": f"Bearer {FIREFLY_III_TOKEN}",
@@ -110,7 +111,7 @@ def create_firefly_transaction(receipt, source_account="Cash wallet"):
                 "date": formatted_date,
                 "amount": str(receipt.amount),
                 "description": receipt.description,
-                "destination_name": receipt.store_name,
+                "destination_name": receipt.destination_account,
                 "source_name": source_account,
                 "category_name": receipt.category,
                 "budget_name": receipt.budget,

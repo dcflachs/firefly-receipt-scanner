@@ -4,7 +4,7 @@ from fastapi import UploadFile
 from PIL import Image
 
 
-async def process_image(file: UploadFile, max_size=(768, 768)):
+async def process_image(file: UploadFile, max_size: tuple[int, int]=(768, 768), quality: int = 85):
     """
     Process an uploaded image by resizing it to the specified dimensions and compressing it.
 
@@ -31,7 +31,7 @@ async def process_image(file: UploadFile, max_size=(768, 768)):
 
     # Save the image to a BytesIO buffer in JPEG format
     buffer = io.BytesIO()
-    img.save(buffer, format="JPEG", quality=85)
+    img.save(buffer, format="JPEG", quality=quality)
     buffer.seek(0)
 
     # Encode the buffer to base64

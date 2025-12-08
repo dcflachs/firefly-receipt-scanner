@@ -13,6 +13,7 @@ from .firefly import (
 )
 from .image_utils import process_image
 from .models import ReceiptModel
+from .prompt_utils import PromptComponents, PromptConstructor
 
 # Load environment variables
 load_dotenv()
@@ -21,6 +22,7 @@ load_dotenv()
 LLM_BASE_URL = os.getenv("LLM_BASE_URL")
 LLM_MODEL_STRING = os.getenv("LLM_MODEL_STRING")
 LLM_API_KEY = os.getenv("LLM_API_KEY")
+LLM_API_TIMEOUT = os.getenv("LLM_API_TIMEOUT", '30')
 
 if not LLM_BASE_URL or not LLM_MODEL_STRING or not LLM_API_KEY:
     raise ValueError("LLM_BASE_URL, LLM_MODEL_STRING, and LLM_API_KEY environment variables must be set")
@@ -28,6 +30,7 @@ if not LLM_BASE_URL or not LLM_MODEL_STRING or not LLM_API_KEY:
 openai.base_url = LLM_BASE_URL
 openai.api_key = LLM_API_KEY
 
+prompt_factory = PromptConstructor()
 
 async def extract_receipt_data(file: UploadFile):
     """Extract data from the receipt image without creating a transaction."""
@@ -63,20 +66,10 @@ async def extract_receipt_data(file: UploadFile):
             print("Using default budgets due to Firefly III connection issues")
 
         # Construct the prompt.
-        receipt_prompt = (
-            "Please analyze the attached receipt image and extract the following details: "
-            "1) receipt amount, 2) receipt category (choose from: "
-            + ", ".join(categories)
-            + "), "
-            "3) receipt budget (choose from: " + ", ".join(budgets) + "), "
-            "4) destination account (store name) "
-            "5) description of the transaction"
-            "5) date (in YYYY-MM-DD format). Today's date is "
-            + datetime.now().strftime("%Y-%m-%d")
-            + ". "
-            "Most receipts are from the past few days, so use today's date as a reference point when interpreting dates. "
-            "If the date is not on the receipt, use today's date as the default."
-        )
+        prompt_components = PromptComponents(catagories=categories, budgets=budgets, schema=str(ReceiptModel.model_json_schema()))
+
+        system_prompt = prompt_factory.get_system_prompt(prompt_components)
+        receipt_prompt = prompt_factory.get_user_prompt(prompt_components)
 
         # Set a shorter timeout for the API call
         try:
@@ -85,20 +78,19 @@ async def extract_receipt_data(file: UploadFile):
             completion = openai.chat.completions.create(
                 model=LLM_MODEL_STRING,
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant that extracts structured receipt data from images."},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": [
                         {"type": "text", "text": receipt_prompt},
                         {"type": "image_url", "image_url": f"data:image/jpeg;base64,{image}"}
                     ]}
                 ],
-                response_format={"type": "json_object"},
-                timeout=30
+                response_format=ReceiptModel.model_json_schema(),
+                timeout=int(LLM_API_TIMEOUT)
             )
             print("Received response from LLM")
             llm_response = completion.choices[0].message
-            # Parse the JSON response into the ReceiptModel (assuming response is in content)
-            import json
-            parsed = ReceiptModel(**json.loads(llm_response.content))
+            print(llm_response.content)
+            parsed = ReceiptModel.model_validate_json(llm_response.content)
         except Exception as e:
             print(f"Error during LLM analysis: {str(e)}")
             print(f"Error type: {type(e)}")
@@ -127,7 +119,7 @@ async def extract_receipt_data(file: UploadFile):
         extracted_data = {
             "date": parsed.date,
             "amount": parsed.amount,
-            "store_name": parsed.store_name,
+            "store_name": parsed.destination_account,
             "description": parsed.description,
             "category": parsed.category,
             "budget": parsed.budget,
@@ -148,7 +140,7 @@ async def create_transaction_from_data(receipt_data, source_account):
     receipt = ReceiptModel(
         date=receipt_data["date"],
         amount=receipt_data["amount"],
-        store_name=receipt_data["store_name"],
+        destination_account=receipt_data["store_name"],
         description=receipt_data["description"],
         category=receipt_data["category"],
         budget=receipt_data["budget"],
@@ -168,7 +160,7 @@ async def create_transaction_from_data(receipt_data, source_account):
                 print("Transaction created successfully:")
                 print(f"- Date: {receipt.date}")
                 print(f"- Amount: {receipt.amount}")
-                print(f"- Store: {receipt.store_name}")
+                print(f"- Store: {receipt.destination_account}")
                 print(f"- Category: {receipt.category}")
                 print(f"- Budget: {receipt.budget}")
                 print(f"- Source Account: {source_account}")
