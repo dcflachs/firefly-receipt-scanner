@@ -26,10 +26,11 @@ def get_gemini_client() -> genai.Client:
 async def extract_receipt_data(file: UploadFile):
     """Extract data from the receipt image without creating a transaction."""
     try:
+        settings = get_settings()
         print(f"Processing image: {file.filename}")
 
         # Process the image (resize and compress with more aggressive settings)
-        image, image_bytes = await process_image(file, max_size=(768, 768))
+        image, image_bytes = await process_image(file, max_size=(settings.max_image_size, settings.max_image_size))
         print("Image processed and encoded to base64")
 
         # Fetch dynamic data from Firefly III
@@ -76,7 +77,6 @@ async def extract_receipt_data(file: UploadFile):
         try:
             print("Sending request to Gemini for analysis...")
             # Generate receipt details using genai with a shorter timeout
-            settings = get_settings()
             client = get_gemini_client()
             gemini_response = client.models.generate_content(
                 model=settings.gemini_model,

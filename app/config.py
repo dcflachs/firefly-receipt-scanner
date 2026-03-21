@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     firefly_iii_token: str
     google_ai_api_key: str
     gemini_model: str = "gemini-2.5-flash"
+    max_image_size: int = 768
 
     @computed_field
     @property
