@@ -1,11 +1,11 @@
-import os
 import time
 from datetime import datetime
+from functools import lru_cache
 
-from dotenv import load_dotenv
 from fastapi import UploadFile
 import openai
 
+from .config import get_settings
 from .firefly import (
     create_firefly_transaction,
     get_firefly_budgets,
@@ -15,20 +15,13 @@ from .image_utils import process_image
 from .models import ReceiptModel
 from .prompt_utils import PromptComponents, PromptConstructor
 
-# Load environment variables
-load_dotenv()
+@lru_cache
+def get_llm_client() -> openai.Client:
+    settings = get_settings()
+    if not settings.llm_base_url or not settings.llm_model_string or not settings.llm_api_key:
+        raise ValueError("LLM_BASE_URL, LLM_MODEL_STRING, and LLM_API_KEY environment variables must be set")
 
-# Get LLM configuration from environment variables
-LLM_BASE_URL = os.getenv("LLM_BASE_URL")
-LLM_MODEL_STRING = os.getenv("LLM_MODEL_STRING")
-LLM_API_KEY = os.getenv("LLM_API_KEY")
-LLM_API_TIMEOUT = os.getenv("LLM_API_TIMEOUT", '30')
-
-if not LLM_BASE_URL or not LLM_MODEL_STRING or not LLM_API_KEY:
-    raise ValueError("LLM_BASE_URL, LLM_MODEL_STRING, and LLM_API_KEY environment variables must be set")
-
-openai.base_url = LLM_BASE_URL
-openai.api_key = LLM_API_KEY
+    return openai.Client(api_key=settings.llm_api_key, base_url=settings.llm_base_url)
 
 prompt_factory = PromptConstructor()
 
@@ -75,8 +68,10 @@ async def extract_receipt_data(file: UploadFile):
         try:
             print("Sending request to LLM for analysis...")
             # Generate receipt details using OpenAI-compatible LLM
-            completion = openai.chat.completions.create(
-                model=LLM_MODEL_STRING,
+            settings = get_settings()
+            client = get_llm_client()
+            completion = client.chat.completions.create(
+                model=settings.llm_model_string,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": [
@@ -85,7 +80,7 @@ async def extract_receipt_data(file: UploadFile):
                     ]}
                 ],
                 response_format=ReceiptModel.model_json_schema(),
-                timeout=int(LLM_API_TIMEOUT)
+                timeout=settings.llm_api_timeout
             )
             print("Received response from LLM")
             llm_response = completion.choices[0].message
